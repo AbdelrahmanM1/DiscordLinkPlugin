@@ -1,0 +1,45 @@
+name: AquixLinkCore
+version: 1.7
+main: me.abdelrahmanmoharramdev.aquixLinkCore.AquixLinkCore
+author: Abdelrahman Moharram
+description: >
+  A simple plugin that links Minecraft usernames with Discord accounts,
+  supporting bidirectional role synchronization (Minecraft <--> Discord).
+
+commands:
+  linkdiscord:
+    description: Start linking your Discord account (generates a verification code).
+    usage: /linkdiscord <discord_id>
+    permission: aquixlinkcore.command.link
+
+  verifylink:
+    description: Complete linking by entering the code you received.
+    usage: /verifylink <code>
+    permission: aquixlinkcore.command.verify
+
+  unlinkdiscord:
+    description: Unlink your Discord account.
+    usage: /unlinkdiscord
+    permission: aquixlinkcore.command.unlink
+
+  reloadlink:
+    description: Reload the AquixLinkCore plugin configuration.
+    usage: /reloadlink
+    permission: aquixlinkcore.command.reload
+
+permissions:
+  aquixlinkcore.command.link:
+    description: Allows a player to initiate the Discord link process.
+    default: true
+
+  aquixlinkcore.command.verify:
+    description: Allows a player to verify and complete linking.
+    default: true
+
+  aquixlinkcore.command.unlink:
+    description: Allows a player to unlink their Discord account.
+    default: true
+
+  aquixlinkcore.command.reload:
+    description: Allows reloading the plugin configuration.
+    default: op
