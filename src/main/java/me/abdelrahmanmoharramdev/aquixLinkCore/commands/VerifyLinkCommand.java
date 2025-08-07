@@ -44,21 +44,22 @@ public class VerifyLinkCommand implements CommandExecutor {
             return true;
         }
 
-        // Expired?
+        // Expired check
         if (linkStorage.isVerificationExpired(player.getUniqueId())) {
             player.sendMessage(ChatColor.RED + "Your verification code has expired. Please use /linkdiscord again.");
             linkStorage.removePendingVerification(player.getUniqueId());
             return true;
         }
 
-        // Code match?
+        // Code match check
         if (!linkStorage.isCodeValid(player.getUniqueId(), code)) {
             player.sendMessage(ChatColor.RED + "Invalid verification code.");
             return true;
         }
 
-        // Success
+        // Success: confirm linking and remove pending verification
         linkStorage.confirmVerification(player.getUniqueId());
+        linkStorage.removePendingVerification(player.getUniqueId());
         player.sendMessage(ChatColor.GREEN + "Your Discord account has been successfully linked!");
         return true;
     }

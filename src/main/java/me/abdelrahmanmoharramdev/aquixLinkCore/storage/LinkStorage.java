@@ -3,6 +3,9 @@ package me.abdelrahmanmoharramdev.aquixLinkCore.storage;
 import me.abdelrahmanmoharramdev.aquixLinkCore.AquixLinkCore;
 
 import java.sql.*;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
 public class LinkStorage {
@@ -16,10 +19,12 @@ public class LinkStorage {
     }
 
     public void setPendingVerification(UUID uuid, String discordId, String code) {
-        try (PreparedStatement ps = db.getConnection().prepareStatement("""
+        String sql = """
             INSERT OR REPLACE INTO pending_verifications (uuid, discord_id, code, created_at)
-            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-        """)) {
+            VALUES (?, ?, ?, datetime('now','localtime'))
+        """; // use localtime for SQLite
+
+        try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             ps.setString(2, discordId);
             ps.setString(3, code);
@@ -30,13 +35,13 @@ public class LinkStorage {
     }
 
     public boolean hasPendingVerification(UUID uuid) {
-        try (PreparedStatement ps = db.getConnection().prepareStatement("""
-            SELECT 1 FROM pending_verifications 
-            WHERE uuid = ? AND created_at >= datetime('now', '-5 minutes')
-        """)) {
+        String sql = "SELECT 1 FROM pending_verifications WHERE uuid = ?";
+
+        try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
-            ResultSet rs = ps.executeQuery();
-            return rs.next();
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
         } catch (SQLException e) {
             plugin.getLogger().warning("Error checking pending verification: " + e.getMessage());
             return false;
@@ -44,17 +49,56 @@ public class LinkStorage {
     }
 
     public boolean isCodeValid(UUID uuid, String code) {
-        try (PreparedStatement ps = db.getConnection().prepareStatement("""
-            SELECT 1 FROM pending_verifications 
-            WHERE uuid = ? AND code = ? AND created_at >= datetime('now', '-5 minutes')
-        """)) {
+        String sql = "SELECT 1 FROM pending_verifications WHERE uuid = ? AND code = ?";
+
+        try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             ps.setString(2, code);
-            ResultSet rs = ps.executeQuery();
-            return rs.next();
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
         } catch (SQLException e) {
             plugin.getLogger().warning("Error checking code validity: " + e.getMessage());
             return false;
+        }
+    }
+
+    public boolean isVerificationExpired(UUID uuid) {
+        String sql = "SELECT created_at FROM pending_verifications WHERE uuid = ?";
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+
+        try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String createdAtStr = rs.getString("created_at");
+                    plugin.getLogger().info("Verification code created at: " + createdAtStr);
+                    LocalDateTime createdAt = LocalDateTime.parse(createdAtStr, formatter);
+                    long createdAtMillis = createdAt.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+
+                    long now = System.currentTimeMillis();
+                    plugin.getLogger().info("Current time millis: " + now + ", Created time millis: " + createdAtMillis);
+                    plugin.getLogger().info("Elapsed millis: " + (now - createdAtMillis));
+
+                    return (now - createdAtMillis) > (5 * 60 * 1000); // expired after 5 minutes
+                }
+            }
+        } catch (Exception e) {
+            plugin.getLogger().warning("Error checking code expiry: " + e.getMessage());
+        }
+
+        // Default to expired on error or not found
+        return true;
+    }
+
+    public void removePendingVerification(UUID uuid) {
+        String sql = "DELETE FROM pending_verifications WHERE uuid = ?";
+
+        try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
+            ps.setString(1, uuid.toString());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Error removing pending verification: " + e.getMessage());
         }
     }
 
@@ -63,54 +107,48 @@ public class LinkStorage {
             conn.setAutoCommit(false);
 
             try (
-                    PreparedStatement select = conn.prepareStatement("""
-                    SELECT discord_id FROM pending_verifications 
-                    WHERE uuid = ? AND created_at >= datetime('now', '-5 minutes')
-                """);
-                    PreparedStatement insert = conn.prepareStatement("""
-                    INSERT OR REPLACE INTO links (uuid, discord_id) VALUES (?, ?)
-                """);
-                    PreparedStatement delete = conn.prepareStatement("""
-                    DELETE FROM pending_verifications WHERE uuid = ?
-                """)
+                    PreparedStatement select = conn.prepareStatement("SELECT discord_id FROM pending_verifications WHERE uuid = ?");
+                    PreparedStatement insert = conn.prepareStatement("INSERT OR REPLACE INTO links (uuid, discord_id) VALUES (?, ?)");
+                    PreparedStatement delete = conn.prepareStatement("DELETE FROM pending_verifications WHERE uuid = ?")
             ) {
                 select.setString(1, uuid.toString());
-                ResultSet rs = select.executeQuery();
+                try (ResultSet rs = select.executeQuery()) {
+                    if (rs.next()) {
+                        String discordId = rs.getString("discord_id");
 
-                if (rs.next()) {
-                    String discordId = rs.getString("discord_id");
+                        insert.setString(1, uuid.toString());
+                        insert.setString(2, discordId);
+                        insert.executeUpdate();
 
-                    insert.setString(1, uuid.toString());
-                    insert.setString(2, discordId);
-                    insert.executeUpdate();
+                        delete.setString(1, uuid.toString());
+                        delete.executeUpdate();
 
-                    delete.setString(1, uuid.toString());
-                    delete.executeUpdate();
-
-                    conn.commit();
-                } else {
-                    plugin.getLogger().warning("No valid pending verification found for UUID: " + uuid);
+                        conn.commit();
+                        return;
+                    } else {
+                        plugin.getLogger().warning("No valid pending verification found for UUID: " + uuid);
+                    }
                 }
-
+                conn.rollback();
             } catch (SQLException e) {
                 conn.rollback();
                 plugin.getLogger().severe("Verification failed for UUID: " + uuid + " — " + e.getMessage());
             } finally {
                 conn.setAutoCommit(true);
             }
-
         } catch (SQLException e) {
             plugin.getLogger().severe("Failed to confirm verification for UUID: " + uuid + " — " + e.getMessage());
         }
     }
 
     public boolean isPlayerLinked(UUID uuid) {
-        try (PreparedStatement ps = db.getConnection().prepareStatement("""
-            SELECT 1 FROM links WHERE uuid = ?
-        """)) {
+        String sql = "SELECT 1 FROM links WHERE uuid = ?";
+
+        try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
-            ResultSet rs = ps.executeQuery();
-            return rs.next();
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
         } catch (SQLException e) {
             plugin.getLogger().warning("Error checking linked player: " + e.getMessage());
             return false;
@@ -118,54 +156,26 @@ public class LinkStorage {
     }
 
     public String getDiscordId(UUID uuid) {
-        try (PreparedStatement ps = db.getConnection().prepareStatement("""
-            SELECT discord_id FROM links WHERE uuid = ?
-        """)) {
+        String sql = "SELECT discord_id FROM links WHERE uuid = ?";
+
+        try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
-            ResultSet rs = ps.executeQuery();
-            if (rs.next()) {
-                return rs.getString("discord_id");
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    return rs.getString("discord_id");
+                }
             }
         } catch (SQLException e) {
             plugin.getLogger().warning("Error retrieving Discord ID for UUID: " + uuid + " — " + e.getMessage());
         }
+
         return null;
-    }
-    public boolean isVerificationExpired(UUID uuid) {
-        try (PreparedStatement ps = db.getConnection().prepareStatement("""
-        SELECT created_at FROM pending_verifications WHERE uuid = ?
-    """)) {
-            ps.setString(1, uuid.toString());
-            ResultSet rs = ps.executeQuery();
-
-            if (rs.next()) {
-                long createdAt = rs.getLong("created_at");
-                long now = System.currentTimeMillis();
-                return (now - createdAt) > (5 * 60 * 1000); // 5 minutes
-            }
-
-        } catch (SQLException e) {
-            plugin.getLogger().warning("Error checking code expiry: " + e.getMessage());
-        }
-
-        return true; // default to expired
-    }
-
-    public void removePendingVerification(UUID uuid) {
-        try (PreparedStatement ps = db.getConnection().prepareStatement("""
-        DELETE FROM pending_verifications WHERE uuid = ?
-    """)) {
-            ps.setString(1, uuid.toString());
-            ps.executeUpdate();
-        } catch (SQLException e) {
-            plugin.getLogger().warning("Error removing pending verification: " + e.getMessage());
-        }
     }
 
     public void unlinkPlayer(UUID uuid) {
-        try (PreparedStatement ps = db.getConnection().prepareStatement("""
-            DELETE FROM links WHERE uuid = ?
-        """)) {
+        String sql = "DELETE FROM links WHERE uuid = ?";
+
+        try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -173,20 +183,21 @@ public class LinkStorage {
         }
     }
 
-    public void close() {
-        db.close();
-    }
-
     public boolean isDiscordIdLinked(String discordId) {
-        try (PreparedStatement ps = db.getConnection().prepareStatement("""
-            SELECT 1 FROM links WHERE discord_id = ?
-        """)) {
+        String sql = "SELECT 1 FROM links WHERE discord_id = ?";
+
+        try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, discordId);
-            ResultSet rs = ps.executeQuery();
-            return rs.next();
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
         } catch (SQLException e) {
             plugin.getLogger().warning("Error checking if Discord ID is already linked: " + e.getMessage());
             return false;
         }
+    }
+
+    public void close() {
+        db.close();
     }
 }

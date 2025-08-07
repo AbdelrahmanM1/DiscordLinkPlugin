@@ -27,6 +27,7 @@ public class DatabaseManager {
             connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
 
             try (Statement stmt = connection.createStatement()) {
+                // Links table
                 stmt.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS links (
                         uuid TEXT PRIMARY KEY,
@@ -34,6 +35,7 @@ public class DatabaseManager {
                     );
                 """);
 
+                // Pending verifications table with created_at timestamp
                 stmt.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS pending_verifications (
                         uuid TEXT PRIMARY KEY,

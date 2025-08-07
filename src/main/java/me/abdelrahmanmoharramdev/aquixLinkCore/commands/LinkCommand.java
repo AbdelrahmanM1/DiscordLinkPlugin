@@ -34,11 +34,16 @@ public class LinkCommand implements CommandExecutor {
             return true;
         }
 
-        // Pending verification exists
+        // Pending verification exists? But check if expired first.
         if (linkStorage.hasPendingVerification(player.getUniqueId())) {
-            player.sendMessage("§cYou already have a pending verification request.");
-            player.sendMessage("§7Use §e/verifylink <code> §7to complete linking.");
-            return true;
+            if (linkStorage.isVerificationExpired(player.getUniqueId())) {
+                // Remove expired pending verification so player can create a new one
+                linkStorage.removePendingVerification(player.getUniqueId());
+            } else {
+                player.sendMessage("§cYou already have a pending verification request.");
+                player.sendMessage("§7Use §e/verifylink <code> §7to complete linking.");
+                return true;
+            }
         }
 
         // Validate command usage
