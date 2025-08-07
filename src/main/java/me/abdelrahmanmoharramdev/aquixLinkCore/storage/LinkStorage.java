@@ -17,8 +17,8 @@ public class LinkStorage {
 
     public void setPendingVerification(UUID uuid, String discordId, String code) {
         try (PreparedStatement ps = db.getConnection().prepareStatement("""
-            INSERT OR REPLACE INTO pending_verifications (uuid, discord_id, code)
-            VALUES (?, ?, ?)
+            INSERT OR REPLACE INTO pending_verifications (uuid, discord_id, code, created_at)
+            VALUES (?, ?, ?, CURRENT_TIMESTAMP)
         """)) {
             ps.setString(1, uuid.toString());
             ps.setString(2, discordId);
@@ -31,7 +31,8 @@ public class LinkStorage {
 
     public boolean hasPendingVerification(UUID uuid) {
         try (PreparedStatement ps = db.getConnection().prepareStatement("""
-            SELECT 1 FROM pending_verifications WHERE uuid = ?
+            SELECT 1 FROM pending_verifications 
+            WHERE uuid = ? AND created_at >= datetime('now', '-5 minutes')
         """)) {
             ps.setString(1, uuid.toString());
             ResultSet rs = ps.executeQuery();
@@ -44,7 +45,8 @@ public class LinkStorage {
 
     public boolean isCodeValid(UUID uuid, String code) {
         try (PreparedStatement ps = db.getConnection().prepareStatement("""
-            SELECT 1 FROM pending_verifications WHERE uuid = ? AND code = ?
+            SELECT 1 FROM pending_verifications 
+            WHERE uuid = ? AND code = ? AND created_at >= datetime('now', '-5 minutes')
         """)) {
             ps.setString(1, uuid.toString());
             ps.setString(2, code);
@@ -58,16 +60,12 @@ public class LinkStorage {
 
     public void confirmVerification(UUID uuid) {
         try (Connection conn = db.getConnection()) {
-            if (conn == null) {
-                plugin.getLogger().severe("Database connection is null during verification.");
-                return;
-            }
-
             conn.setAutoCommit(false);
 
             try (
                     PreparedStatement select = conn.prepareStatement("""
-                    SELECT discord_id FROM pending_verifications WHERE uuid = ?
+                    SELECT discord_id FROM pending_verifications 
+                    WHERE uuid = ? AND created_at >= datetime('now', '-5 minutes')
                 """);
                     PreparedStatement insert = conn.prepareStatement("""
                     INSERT OR REPLACE INTO links (uuid, discord_id) VALUES (?, ?)
@@ -91,7 +89,7 @@ public class LinkStorage {
 
                     conn.commit();
                 } else {
-                    plugin.getLogger().warning("No pending verification found for UUID: " + uuid);
+                    plugin.getLogger().warning("No valid pending verification found for UUID: " + uuid);
                 }
 
             } catch (SQLException e) {
@@ -133,6 +131,36 @@ public class LinkStorage {
         }
         return null;
     }
+    public boolean isVerificationExpired(UUID uuid) {
+        try (PreparedStatement ps = db.getConnection().prepareStatement("""
+        SELECT created_at FROM pending_verifications WHERE uuid = ?
+    """)) {
+            ps.setString(1, uuid.toString());
+            ResultSet rs = ps.executeQuery();
+
+            if (rs.next()) {
+                long createdAt = rs.getLong("created_at");
+                long now = System.currentTimeMillis();
+                return (now - createdAt) > (5 * 60 * 1000); // 5 minutes
+            }
+
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Error checking code expiry: " + e.getMessage());
+        }
+
+        return true; // default to expired
+    }
+
+    public void removePendingVerification(UUID uuid) {
+        try (PreparedStatement ps = db.getConnection().prepareStatement("""
+        DELETE FROM pending_verifications WHERE uuid = ?
+    """)) {
+            ps.setString(1, uuid.toString());
+            ps.executeUpdate();
+        } catch (SQLException e) {
+            plugin.getLogger().warning("Error removing pending verification: " + e.getMessage());
+        }
+    }
 
     public void unlinkPlayer(UUID uuid) {
         try (PreparedStatement ps = db.getConnection().prepareStatement("""
@@ -149,7 +177,6 @@ public class LinkStorage {
         db.close();
     }
 
-    //  utility method — useful for checking duplicate links
     public boolean isDiscordIdLinked(String discordId) {
         try (PreparedStatement ps = db.getConnection().prepareStatement("""
             SELECT 1 FROM links WHERE discord_id = ?
@@ -161,5 +188,5 @@ public class LinkStorage {
             plugin.getLogger().warning("Error checking if Discord ID is already linked: " + e.getMessage());
             return false;
         }
-        }
+    }
 }

@@ -20,7 +20,12 @@ public class VerifyLinkCommand implements CommandExecutor {
         Player player = (Player) sender;
         LinkStorage linkStorage = AquixLinkCore.getInstance().getLinkStorage();
 
-        // Check already linked
+        if (linkStorage == null) {
+            player.sendMessage(ChatColor.RED + "Internal error: Link storage unavailable.");
+            return true;
+        }
+
+        // Already linked
         if (linkStorage.isPlayerLinked(player.getUniqueId())) {
             player.sendMessage(ChatColor.RED + "You are already linked to a Discord account.");
             return true;
@@ -33,19 +38,26 @@ public class VerifyLinkCommand implements CommandExecutor {
 
         String code = args[0];
 
-        // Check if pending verification exists
+        // No pending verification
         if (!linkStorage.hasPendingVerification(player.getUniqueId())) {
             player.sendMessage(ChatColor.RED + "You have no pending link request.");
             return true;
         }
 
-        // Check if code matches
+        // Expired?
+        if (linkStorage.isVerificationExpired(player.getUniqueId())) {
+            player.sendMessage(ChatColor.RED + "Your verification code has expired. Please use /linkdiscord again.");
+            linkStorage.removePendingVerification(player.getUniqueId());
+            return true;
+        }
+
+        // Code match?
         if (!linkStorage.isCodeValid(player.getUniqueId(), code)) {
             player.sendMessage(ChatColor.RED + "Invalid verification code.");
             return true;
         }
 
-        // Confirm verification
+        // Success
         linkStorage.confirmVerification(player.getUniqueId());
         player.sendMessage(ChatColor.GREEN + "Your Discord account has been successfully linked!");
         return true;

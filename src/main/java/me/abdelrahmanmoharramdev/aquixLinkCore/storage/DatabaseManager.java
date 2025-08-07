@@ -3,10 +3,7 @@ package me.abdelrahmanmoharramdev.aquixLinkCore.storage;
 import me.abdelrahmanmoharramdev.aquixLinkCore.AquixLinkCore;
 
 import java.io.File;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.SQLException;
-import java.sql.Statement;
+import java.sql.*;
 
 public class DatabaseManager {
 
@@ -30,7 +27,6 @@ public class DatabaseManager {
             connection = DriverManager.getConnection("jdbc:sqlite:" + dbFile.getAbsolutePath());
 
             try (Statement stmt = connection.createStatement()) {
-                // Table: linked users
                 stmt.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS links (
                         uuid TEXT PRIMARY KEY,
@@ -38,12 +34,12 @@ public class DatabaseManager {
                     );
                 """);
 
-                // Table: pending verifications
                 stmt.executeUpdate("""
                     CREATE TABLE IF NOT EXISTS pending_verifications (
                         uuid TEXT PRIMARY KEY,
                         discord_id TEXT NOT NULL,
-                        code TEXT NOT NULL
+                        code TEXT NOT NULL,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     );
                 """);
             }

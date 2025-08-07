@@ -23,17 +23,25 @@ public class LinkCommand implements CommandExecutor {
         Player player = (Player) sender;
         LinkStorage linkStorage = AquixLinkCore.getInstance().getLinkStorage();
 
+        if (linkStorage == null) {
+            player.sendMessage("§cInternal error: link storage unavailable.");
+            return true;
+        }
+
+        // Already linked
         if (linkStorage.isPlayerLinked(player.getUniqueId())) {
             player.sendMessage("§cYou are already linked to a Discord account.");
             return true;
         }
 
+        // Pending verification exists
         if (linkStorage.hasPendingVerification(player.getUniqueId())) {
-            player.sendMessage("§cYou already have a pending verification.");
-            player.sendMessage("§7Use §e/verifylink <code> §7to complete the linking process.");
+            player.sendMessage("§cYou already have a pending verification request.");
+            player.sendMessage("§7Use §e/verifylink <code> §7to complete linking.");
             return true;
         }
 
+        // Validate command usage
         if (args.length != 1) {
             player.sendMessage("§cUsage: /linkdiscord <discord_id>");
             return true;
@@ -41,18 +49,28 @@ public class LinkCommand implements CommandExecutor {
 
         String discordId = args[0];
 
-        // Validate Discord ID
+        // Validate Discord ID format
         if (!discordId.matches("^\\d{17,20}$")) {
-            player.sendMessage("§cInvalid Discord ID. Please use your 18-digit numeric Discord user ID.");
+            player.sendMessage("§cInvalid Discord ID. It should be a 17–20 digit number.");
             return true;
         }
 
-        // Generate 6-digit verification code
+        // Check if Discord ID is already linked to another player
+        if (linkStorage.isDiscordIdLinked(discordId)) {
+            player.sendMessage("§cThis Discord ID is already linked to another player.");
+            return true;
+        }
+
+        // Generate and store a 6-digit verification code
         String code = String.format("%06d", random.nextInt(1_000_000));
         linkStorage.setPendingVerification(player.getUniqueId(), discordId, code);
 
-        player.sendMessage("§aVerification code generated!");
-        player.sendMessage("§7Use §e/verifylink " + code + " §7to confirm the link.");
+        // Send success messages
+        player.sendMessage("§a✅ A verification code has been generated.");
+        player.sendMessage("§7To complete the process, type:");
+        player.sendMessage("§e/verifylink " + code);
+        player.sendMessage("§7Note: This code is valid for 5 minutes.");
+
         return true;
     }
 }
