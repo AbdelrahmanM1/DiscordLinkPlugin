@@ -1,6 +1,7 @@
 package me.abdelrahmanmoharramdev.aquixLinkCore.storage;
 
 import me.abdelrahmanmoharramdev.aquixLinkCore.AquixLinkCore;
+import me.abdelrahmanmoharramdev.aquixLinkCore.Cache.CacheProcessor;
 
 import java.sql.*;
 import java.time.LocalDateTime;
@@ -12,31 +13,39 @@ public class LinkStorage {
 
     private final AquixLinkCore plugin;
     private final DatabaseManager db;
+    private final CacheProcessor cacheProcessor;
 
     public LinkStorage(AquixLinkCore plugin) {
         this.plugin = plugin;
         this.db = new DatabaseManager(plugin);
+        this.cacheProcessor = new CacheProcessor();
     }
 
     public void setPendingVerification(UUID uuid, String discordId, String code) {
         String sql = """
             INSERT OR REPLACE INTO pending_verifications (uuid, discord_id, code, created_at)
             VALUES (?, ?, ?, datetime('now','localtime'))
-        """; // use localtime for SQLite
+        """;
 
         try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             ps.setString(2, discordId);
             ps.setString(3, code);
             ps.executeUpdate();
+
+            // Cache the pending verification code
+            cacheProcessor.cachePendingVerification(uuid, code);
+
         } catch (SQLException e) {
             plugin.getLogger().severe("Error storing pending verification: " + e.getMessage());
         }
     }
 
     public boolean hasPendingVerification(UUID uuid) {
-        String sql = "SELECT 1 FROM pending_verifications WHERE uuid = ?";
+        // Check cache first for pending code existence
+        if (cacheProcessor.getCachedPendingCode(uuid) != null) return true;
 
+        String sql = "SELECT 1 FROM pending_verifications WHERE uuid = ?";
         try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             try (ResultSet rs = ps.executeQuery()) {
@@ -49,8 +58,13 @@ public class LinkStorage {
     }
 
     public boolean isCodeValid(UUID uuid, String code) {
-        String sql = "SELECT 1 FROM pending_verifications WHERE uuid = ? AND code = ?";
+        // Check cache first for code validity
+        String cachedCode = cacheProcessor.getCachedPendingCode(uuid);
+        if (cachedCode != null) {
+            return cachedCode.equals(code);
+        }
 
+        String sql = "SELECT 1 FROM pending_verifications WHERE uuid = ? AND code = ?";
         try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             ps.setString(2, code);
@@ -80,15 +94,13 @@ public class LinkStorage {
                     plugin.getLogger().info("Current time millis: " + now + ", Created time millis: " + createdAtMillis);
                     plugin.getLogger().info("Elapsed millis: " + (now - createdAtMillis));
 
-                    return (now - createdAtMillis) > (5 * 60 * 1000); // expired after 5 minutes
+                    return (now - createdAtMillis) > (5 * 60 * 1000); // 5 min expiry
                 }
             }
         } catch (Exception e) {
             plugin.getLogger().warning("Error checking code expiry: " + e.getMessage());
         }
-
-        // Default to expired on error or not found
-        return true;
+        return true; // expire by default on error or not found
     }
 
     public void removePendingVerification(UUID uuid) {
@@ -97,6 +109,10 @@ public class LinkStorage {
         try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             ps.executeUpdate();
+
+            // Invalidate cache
+            cacheProcessor.invalidatePendingVerification(uuid);
+
         } catch (SQLException e) {
             plugin.getLogger().warning("Error removing pending verification: " + e.getMessage());
         }
@@ -109,7 +125,7 @@ public class LinkStorage {
             try (
                     PreparedStatement select = conn.prepareStatement("SELECT discord_id FROM pending_verifications WHERE uuid = ?");
                     PreparedStatement insert = conn.prepareStatement("INSERT OR REPLACE INTO links (uuid, discord_id) VALUES (?, ?)");
-                    PreparedStatement delete = conn.prepareStatement("DELETE FROM pending_verifications WHERE uuid = ?")
+                    PreparedStatement delete = conn.prepareStatement("DELETE FROM pending_verifications WHERE uuid = ?");
             ) {
                 select.setString(1, uuid.toString());
                 try (ResultSet rs = select.executeQuery()) {
@@ -124,6 +140,11 @@ public class LinkStorage {
                         delete.executeUpdate();
 
                         conn.commit();
+
+                        // Update caches
+                        cacheProcessor.cacheLinkedPlayer(uuid, discordId);
+                        cacheProcessor.invalidatePendingVerification(uuid);
+
                         return;
                     } else {
                         plugin.getLogger().warning("No valid pending verification found for UUID: " + uuid);
@@ -142,12 +163,22 @@ public class LinkStorage {
     }
 
     public boolean isPlayerLinked(UUID uuid) {
-        String sql = "SELECT 1 FROM links WHERE uuid = ?";
+        // Check cache first
+        if (cacheProcessor.getCachedDiscordId(uuid) != null) return true;
 
+        String sql = "SELECT 1 FROM links WHERE uuid = ?";
         try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             try (ResultSet rs = ps.executeQuery()) {
-                return rs.next();
+                boolean linked = rs.next();
+                if (linked) {
+                    // Cache linked player for future calls
+                    String discordId = getDiscordId(uuid);
+                    if (discordId != null) {
+                        cacheProcessor.cacheLinkedPlayer(uuid, discordId);
+                    }
+                }
+                return linked;
             }
         } catch (SQLException e) {
             plugin.getLogger().warning("Error checking linked player: " + e.getMessage());
@@ -156,19 +187,24 @@ public class LinkStorage {
     }
 
     public String getDiscordId(UUID uuid) {
-        String sql = "SELECT discord_id FROM links WHERE uuid = ?";
+        // Check cache first
+        String cached = cacheProcessor.getCachedDiscordId(uuid);
+        if (cached != null) return cached;
 
+        String sql = "SELECT discord_id FROM links WHERE uuid = ?";
         try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 if (rs.next()) {
-                    return rs.getString("discord_id");
+                    String discordId = rs.getString("discord_id");
+                    // Cache it
+                    cacheProcessor.cacheLinkedPlayer(uuid, discordId);
+                    return discordId;
                 }
             }
         } catch (SQLException e) {
             plugin.getLogger().warning("Error retrieving Discord ID for UUID: " + uuid + " — " + e.getMessage());
         }
-
         return null;
     }
 
@@ -178,6 +214,10 @@ public class LinkStorage {
         try (PreparedStatement ps = db.getConnection().prepareStatement(sql)) {
             ps.setString(1, uuid.toString());
             ps.executeUpdate();
+
+            // Remove from cache
+            cacheProcessor.invalidateLinkedPlayer(uuid);
+
         } catch (SQLException e) {
             plugin.getLogger().warning("Error unlinking player with UUID: " + uuid + " — " + e.getMessage());
         }
