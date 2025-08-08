@@ -6,7 +6,7 @@
 
     <groupId>me.abdelrahmanmoharramdev</groupId>
     <artifactId>AquixLinkCore</artifactId>
-    <version>2.0</version>
+    <version>2.2</version>
     <packaging>jar</packaging>
 
     <name>AquixLinkCore</name>

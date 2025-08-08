@@ -26,9 +26,11 @@ public class UnlinkCommand implements CommandExecutor {
         }
 
         if (!linkStorage.isPlayerLinked(player.getUniqueId())) {
-            player.sendMessage(ChatColor.RED + "You are not linked.");
+            player.sendMessage(ChatColor.RED + "You are not linked to any Discord account. "
+                    + ChatColor.GREEN + "To link, use /linkdiscord <discord_id>.");
             return true;
         }
+
 
         linkStorage.unlinkPlayer(player.getUniqueId());
         player.sendMessage(ChatColor.GREEN + "Successfully unlinked your Discord account.");
