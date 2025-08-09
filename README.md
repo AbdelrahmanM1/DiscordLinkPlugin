@@ -13,6 +13,7 @@ A Minecraft server plugin for linking Minecraft player accounts with Discord acc
 - Storage of links and pending verifications in an SQLite database.
 - Easy unlinking of Discord accounts.
 - Simple and efficient SQL database management.
+- has a good simple caching using google 
 
 ---
 
