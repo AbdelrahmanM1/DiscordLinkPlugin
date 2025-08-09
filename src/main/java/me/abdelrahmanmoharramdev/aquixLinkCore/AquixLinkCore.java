@@ -3,6 +3,7 @@ package me.abdelrahmanmoharramdev.aquixLinkCore;
 import me.abdelrahmanmoharramdev.aquixLinkCore.commands.LinkCommand;
 import me.abdelrahmanmoharramdev.aquixLinkCore.commands.ReloadLinkCommand;
 import me.abdelrahmanmoharramdev.aquixLinkCore.commands.UnlinkCommand;
+import me.abdelrahmanmoharramdev.aquixLinkCore.Listeners.PlayerJoinListener;
 import me.abdelrahmanmoharramdev.aquixLinkCore.commands.VerifyLinkCommand;
 import me.abdelrahmanmoharramdev.aquixLinkCore.storage.LinkStorage;
 import org.bukkit.plugin.java.JavaPlugin;
@@ -28,6 +29,9 @@ public final class AquixLinkCore extends JavaPlugin {
         getCommand("unlinkdiscord").setExecutor(new UnlinkCommand());
         getCommand("reloadlink").setExecutor(new ReloadLinkCommand());
         getCommand("verifylink").setExecutor(new VerifyLinkCommand());
+
+        // Register Events
+        getServer().getPluginManager().registerEvents(new PlayerJoinListener(), this);
 
         getLogger().info("AquixLinkCore has been enabled.");
     }
